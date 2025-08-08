@@ -1,5 +1,7 @@
 import { TxConfig } from './tx_config';
 import { LogLevel } from './logger';
+import dotenv from 'dotenv';
+dotenv.config();
 
 export interface DatabaseConfig {
     host: string;
@@ -80,6 +82,7 @@ export const DEFAULT_CONFIG: TccConfig = {
 // 从环境变量加载配置
 export function loadConfigFromEnv(): Partial<TccConfig> {
     const config: Partial<TccConfig> = {};
+    console.log('DB_PASSWORD: ', process.env.DB_PASSWORD)
     
     // 事务配置
     if (process.env.TCC_TRANSACTION_TIMEOUT) {

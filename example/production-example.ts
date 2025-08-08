@@ -6,7 +6,7 @@ import { DEFAULT_CONFIG, loadConfigFromEnv, mergeConfig, createTxConfig, validat
 import { TccComponent } from "../src/tccComponent";
 import { withRetry, RetryableError } from "../src/retry";
 import * as mysql from 'mysql2/promise';
-import * as dayjs from "dayjs";
+import dayjs from "dayjs";
 
 // 生产级转账组件实现
 class TransferComponent implements TccComponent {

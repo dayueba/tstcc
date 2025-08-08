@@ -1,5 +1,5 @@
 import * as mysql from 'mysql2/promise';
-import * as dayjs from 'dayjs';
+import dayjs from 'dayjs';
 import { TxStore } from '../tx_store';
 import { TccComponent } from '../tccComponent';
 import { Transaction, ComponentTryStatusRecord } from '../model';

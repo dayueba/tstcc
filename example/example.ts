@@ -8,7 +8,7 @@ import { TccComponent } from "../src/tccComponent";
 import { TxStore } from "../src/tx_store";
 import { ComponentTryStatus, TXStatus } from "../src/enums";
 import { Transaction } from "../src/model";
-import * as dayjs from "dayjs";
+import dayjs from "dayjs";
 
 
 // a转账给b 100元

@@ -24,6 +24,8 @@
 - **可配置性**：环境变量配置、多环境支持
 - **幂等性**：组件幂等包装器、去重键机制
 - **测试覆盖**：单元测试、集成测试、Mock 组件
+- **🌐 HTTP 服务**：RESTful API、Web 仪表板、WebSocket 实时推送
+- **🔗 网络组件**：支持远程 HTTP 服务注册、自动健康检查
 
 ## 技术栈
 
@@ -76,10 +78,28 @@ npm run dev:example
 #### 生产级示例
 ```bash
 npm run build
-node dist/example/production-example.js
+npm run start:production
 # 或直接运行 TS
-npx ts-node example/production-example.ts
+npm run dev:production
 ```
+
+#### **🚀 HTTP 服务器模式（推荐）**
+```bash
+# 1. 启动 TCC 服务器
+npm run dev:server
+
+# 2. 启动模拟业务服务（另一个终端）
+npm run dev:mock-services
+
+# 3. 运行客户端示例（第三个终端）
+npm run dev:client
+
+# 或者一键启动演示（需要安装 concurrently）
+npm run demo
+```
+
+#### **Web 仪表板**
+服务器启动后，访问：http://localhost:3000/dashboard
 
 ### 5. 运行测试
 ```bash
@@ -102,12 +122,20 @@ src/                    # 核心源码
   retry.ts              # 重试机制
   errors.ts             # 错误类型定义
   config.ts             # 配置管理
+  server.ts             # HTTP 服务器
+  network-component.ts  # 网络 TCC 组件
   stores/               # 存储实现
     mysql-store.ts      # MySQL 生产级存储
 example/                # 使用示例
   example.ts            # 基础示例：A->B 转账
   production-example.ts # 生产级示例：完整特性演示
+  server-example.ts     # HTTP 服务器示例
+  mock-service.ts       # 模拟业务服务
+  client-example.ts     # 客户端示例
   database.sql          # 演示所需表结构
+dashboard/              # Web 仪表板
+  index.html            # 仪表板页面
+  dashboard.js          # 前端 JavaScript
 tests/                  # 测试文件
   setup.ts              # 测试配置
   tx_manager.test.ts    # 事务管理器测试
