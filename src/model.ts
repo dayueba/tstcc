@@ -1,20 +1,14 @@
-import {ComponentTryStatus, TXStatus} from "./enums";
+import { ComponentTryStatus, TXStatus } from "./enums";
 
-// 事务
-export class Transaction {
-    // @ts-ignore
-    txID: number
-    // @ts-ignore
-    component_try_statuses: any // todo
-    // @ts-ignore
-    status: TXStatus
-    // @ts-ignore
-    createdAt: string
+export type ComponentTryStatusRecord = Record<string, {
+    componentId: string;
+    tryStatus: ComponentTryStatus;
+}>;
 
-    // constructor(txID: string, components: { tryStatus: ComponentTryStatus, componentID: string }[]) {
-    //     this.txID = txID
-    //     this.components = components
-    //     this.status = TXStatus.TXHanging
-    //     this.createdAt = dayjs().format('YYYY-MM-DD HH:mm:ss')
-    // }
+// 事务模型（与示例 SQL 中的字段保持一致）
+export interface Transaction {
+    id: number;
+    status: TXStatus;
+    component_try_statuses: ComponentTryStatusRecord;
+    created_at: string; // 格式：YYYY-MM-DD HH:mm:ss
 }

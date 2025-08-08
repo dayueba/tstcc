@@ -1,20 +1,17 @@
-import {TxManager} from "../src/tx_manager";
-import Redis from "ioredis";
-import {RedisComponent} from "../src/component/redis.component";
-import {TypeormStore} from "../src/tx_store/typeorm.store";
-import {TxConfig} from "../src/tx_config";
-
+import { TxManager } from "../src/tx_manager";
+import { TxConfig } from "../src/tx_config";
+import { MySQLTxStore } from "../src/stores/mysql-store";
+import { logger, LogLevel } from "../src/logger";
+import { metricsCollector } from "../src/metrics";
 import * as mysql from 'mysql2/promise';
-import {TccComponent} from "../src/tccComponent";
-import {TxStore} from "../src/tx_store";
-import {ComponentTryStatus, TXStatus} from "../src/enums";
+import { TccComponent } from "../src/tccComponent";
+import { TxStore } from "../src/tx_store";
+import { ComponentTryStatus, TXStatus } from "../src/enums";
 import { Transaction } from "../src/model";
-import {afterEach} from "node:test";
 import * as dayjs from "dayjs";
 
 
 // a转账给b 100元
-
 class MockComponent implements TccComponent {
     id: string
     // redisClient: Redis
@@ -86,24 +83,97 @@ class MockTxStore implements TxStore {
             throw new Error('更新事务记录失败');
         }
     }
-    GetHangingTXs(): Promise<Transaction[]> {
-        throw new Error("Method not implemented.");
+    async GetHangingTXs(): Promise<Transaction[]> {
+        const context = { operation: 'GetHangingTXs' };
+        
+        try {
+            const sql = `
+                SELECT * FROM tx_record 
+                WHERE status = ? 
+                ORDER BY created_at ASC
+                LIMIT 100
+            `;
+            
+            const [rows] = await this.pool.query(sql, [TXStatus.TXHanging]);
+            
+            const transactions = (rows as any[]).map(row => {
+                return {
+                    id: row.id,
+                    status: row.status,
+                    component_try_statuses: typeof row.component_try_statuses === 'string'
+                        ? JSON.parse(row.component_try_statuses)
+                        : row.component_try_statuses,
+                    created_at: dayjs(row.created_at).format('YYYY-MM-DD HH:mm:ss')
+                } as Transaction;
+            });
+            
+            logger.debug('获取挂起事务成功', { ...context, count: transactions.length });
+            return transactions;
+            
+        } catch (error) {
+            logger.error('获取挂起事务失败', error as Error, context);
+            return [];
+        }
     }
     async GetTX(txID: number): Promise<Transaction> {
         const [res] = await this.pool.query(`select * from tx_record where id = ${txID}`)
-        if ((res as Transaction[]).length === 0) {
+        if ((res as any[]).length === 0) {
             throw new Error('未找到事务记录');
         }
-        const transaction = (res as Transaction[])[0];
-        // transaction.components = (new Map(JSON.parse(transaction.components as any))) as any;
-        return transaction
+        const row = (res as any[])[0];
+        // 解析 JSON 字段
+        const tx: Transaction = {
+            id: row.id,
+            status: row.status,
+            component_try_statuses: typeof row.component_try_statuses === 'string'
+                ? JSON.parse(row.component_try_statuses)
+                : row.component_try_statuses,
+            created_at: dayjs(row.created_at).format('YYYY-MM-DD HH:mm:ss')
+        };
+        return tx
 
     }
-    Lock(expireDuration: number): Promise<void> {
-        throw new Error("Method not implemented.");
+    async Lock(expireDuration: number): Promise<void> {
+        const context = { operation: 'Lock', expireDuration };
+        
+        try {
+            // 使用 GET_LOCK 函数实现分布式锁
+            const sql = `SELECT GET_LOCK(?, ?) as lock_result`;
+            const [rows] = await this.pool.query(sql, ['tcc_global_lock', expireDuration / 1000]);
+            
+            const lockResult = (rows as any[])[0]?.lock_result;
+            
+            if (lockResult !== 1) {
+                throw new Error(`获取锁失败: ${lockResult}`);
+            }
+
+            logger.debug('获取锁成功', context);
+            
+        } catch (error) {
+            logger.error('获取锁失败', error as Error, context);
+            throw error;
+        }
     }
-    Unlock(): Promise<void> {
-        throw new Error("Method not implemented.");
+    
+    async Unlock(): Promise<void> {
+        const context = { operation: 'Unlock' };
+        
+        try {
+            // 使用 RELEASE_LOCK 函数释放锁
+            const sql = `SELECT RELEASE_LOCK(?) as release_result`;
+            const [rows] = await this.pool.query(sql, ['tcc_global_lock']);
+            
+            const releaseResult = (rows as any[])[0]?.release_result;
+            
+            if (releaseResult !== 1) {
+                logger.warn('释放锁失败或锁已过期', { ...context, releaseResult });
+            } else {
+                logger.debug('释放锁成功', context);
+            }
+            
+        } catch (error) {
+            logger.error('释放锁异常', error as Error, context);
+        }
     }
 
     async CreateTx(components: TccComponent[]): Promise<number> {
@@ -127,6 +197,9 @@ class MockTxStore implements TxStore {
 }
 
 async function main() {
+    // 设置日志级别为 DEBUG 以查看详细日志
+    logger.info('TCC 分布式事务示例启动');
+
     const pool = mysql.createPool({
         host: 'localhost',
         user: 'root',
@@ -141,31 +214,57 @@ async function main() {
         keepAliveInitialDelay: 0
     });
 
+    // 创建组件：A 向 B 转账 100 元
     const componentA = new MockComponent(
-        'A', pool, newUpdateTradingSql('A', -100), newUpdateBalanceSql('A', -100), newUpdateBalanceSql('A', 100)
-    )
+        'A', pool, 
+        newUpdateTradingSql('A', -100),  // try: 冻结 A 的 100 元
+        newUpdateBalanceSql('A', -100),  // confirm: 从 A 的余额中扣除 100 元
+        newUpdateBalanceSql('A', 100)    // cancel: 解冻 A 的 100 元
+    );
+    
     const componentB = new MockComponent(
-        'B', pool, newUpdateTradingSql('B', 100), newUpdateBalanceSql('B', 100), newUpdateBalanceSql('B', -100)
-    )
+        'B', pool, 
+        newUpdateTradingSql('B', 100),   // try: 为 B 预留 100 元
+        newUpdateBalanceSql('B', 100),   // confirm: 增加 B 的余额 100 元
+        newUpdateBalanceSql('B', -100)   // cancel: 取消为 B 预留的 100 元
+    );
 
+    // 使用生产级存储（可选，这里仍用示例存储）
     const txStore = new MockTxStore(pool);
-    const config = new TxConfig(5000, 1000)
-    const txManager = new TxManager(txStore, config)
+    // 或者使用生产级存储：
+    // const txStore = new MySQLTxStore({ pool });
+
+    // 配置：5秒超时，1秒监控间隔，关闭监控（示例）
+    const config = new TxConfig(5000, 1000, false);
+    const txManager = new TxManager(txStore, config);
 
     try {
-        txManager.register(componentA)
-        txManager.register(componentB)
+        // 注册组件
+        txManager.register(componentA);
+        txManager.register(componentB);
 
-        await txManager.startTransaction();
-        console.log('success')
+        logger.info('开始执行转账事务');
+        
+        // 启动事务
+        const result = await txManager.startTransaction();
+        
+        if (result.success) {
+            logger.info('转账事务执行成功', { txId: result.txId });
+        } else {
+            logger.warn('转账事务执行失败', { txId: result.txId });
+        }
+
+        // 打印指标
+        metricsCollector.logMetricsSummary();
+        
     } catch (e) {
-        console.log('fail')
-        console.error(e)
+        logger.error('转账事务异常', e as Error);
     } finally {
-        txManager.stop()
+        // 优雅停止
+        await txManager.stop();
+        await pool.end();
+        logger.info('示例程序结束');
     }
-
-
 }
 
 main()
